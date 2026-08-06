@@ -1,8 +1,9 @@
 import express from "express";
+import { handlerHealth } from "./routes/health.js";
 import {
   errorHandlerMiddleware,
   logResponsesMiddleware,
-} from "./utils/middleware";
+} from "./utils/middleware.js";
 
 const app = express();
 const PORT = 8080;
@@ -10,9 +11,9 @@ const PORT = 8080;
 app.use(express.json());
 app.use(logResponsesMiddleware);
 
-// Routes
+app.get("/health", handlerHealth);
 
-app.use("/api/v1/auth");
+app.use("/app", express.static("./src/app"));
 
 app.use(errorHandlerMiddleware);
 

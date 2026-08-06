@@ -4,14 +4,21 @@ import {
   UnauthorizedError,
   ForbiddenError,
   NotFoundError,
-} from "./errors";
+} from "./errors.js";
 
-export function logResponsesMiddleware(req: Request, res: Response) {
-  if (res.statusCode !== 200) {
-    console.log(
-      `[NON-OK] ${req.method} ${req.url} - Status: ${res.statusCode}`,
-    );
-  }
+export function logResponsesMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  res.on("finish", () => {
+    if (res.statusCode !== 200) {
+      console.log(
+        `[NON-OK] ${req.method} ${req.url} - Status: ${res.statusCode}`,
+      );
+    }
+  });
+  next();
 }
 
 export function errorHandlerMiddleware(
