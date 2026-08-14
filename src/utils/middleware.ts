@@ -29,6 +29,12 @@ export function errorHandlerMiddleware(
 ) {
   console.log(err);
 
+  if (err instanceof SyntaxError || isJsonParseError(err)) {
+    return res.status(400).json({
+      error: "malformed JSON",
+    });
+  }
+
   if (err instanceof BadRequestError) {
     return res.status(400).json({
       error: err.message,
@@ -56,4 +62,11 @@ export function errorHandlerMiddleware(
   return res.status(500).json({
     error: "Internal server error",
   });
+}
+
+function isJsonParseError(err: Error): boolean {
+  return (
+    "type" in err &&
+    (err as Error & { type?: string }).type === "entity.parse.failed"
+  );
 }

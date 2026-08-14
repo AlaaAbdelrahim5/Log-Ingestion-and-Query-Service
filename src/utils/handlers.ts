@@ -8,7 +8,5 @@ export async function handlerReset(_req: Request, res: Response) {
       "Forbidden. This action is only available in development environment.",
     );
 
-  // await deleteAllUsers();
-
   res.status(200).send("OK");
 }

@@ -1,5 +1,20 @@
 {
   "version": "7",
   "dialect": "postgresql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1786711941272,
+      "tag": "0000_abnormal_risque",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786714813375,
+      "tag": "0001_lean_wrecking_crew",
+      "breakpoints": true
+    }
+  ]
 }

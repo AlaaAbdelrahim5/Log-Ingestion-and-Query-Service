@@ -9,7 +9,8 @@
     "dev": "npx tsc && node dist/index.js",
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "smoke": "bash scripts/smoke.sh"
   },
   "keywords": [],
   "author": "",

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Start stack
+        run: docker compose up -d --build
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+
+      - name: Required-contract smoke (AUTH_ENABLED=false)
+        run: |
+          chmod +x scripts/smoke.sh
+          BASE_URL=http://localhost:8080 ./scripts/smoke.sh
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
