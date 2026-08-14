@@ -120,7 +120,6 @@ None. Auth, API keys, tenancy, and rate limits are off.
 | `RETENTION_DAYS` | `30` | Age after which logs are deleted |
 | `RETENTION_INTERVAL_MS` | `60000` | Retention worker period |
 | `RETENTION_BATCH_SIZE` | `5000` | Rows deleted per batch |
-| `PLATFORM` | `dev` locally / `prod` in Compose | Unused by the required API |
 
 `AUTH_ENABLED` is not read. An `Authorization` header is ignored.
 

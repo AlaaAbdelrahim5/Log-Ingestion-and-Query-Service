@@ -20,9 +20,6 @@ export function envOrDefault(key: string, fallback: string): string {
 }
 
 export const config: Config = {
-  api: {
-    platform: envOrDefault("PLATFORM", "dev"),
-  },
   db: {
     url: envOrThrow("DB_URL"),
     migrationConfig: {

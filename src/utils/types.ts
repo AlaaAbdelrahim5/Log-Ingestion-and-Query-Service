@@ -1,15 +1,4 @@
 import { MigrationConfig } from "drizzle-orm/migrator";
-import { Request, Response, NextFunction } from "express";
-
-export type Middleware = (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => void;
-
-export type APIConfig = {
-  platform: string;
-};
 
 export type DBConfig = {
   url: string;
@@ -23,7 +12,6 @@ export type RetentionConfig = {
 };
 
 export type Config = {
-  api: APIConfig;
   db: DBConfig;
   retention: RetentionConfig;
 };

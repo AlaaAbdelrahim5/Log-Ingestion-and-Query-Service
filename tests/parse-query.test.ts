@@ -4,7 +4,7 @@ import {
   encodeCursor,
   parseAggregateQuery,
   parseLogQuery,
-} from "../src/utils/parse-query.js";
+} from "../src/validation/parse-query.js";
 
 describe("parseLogQuery", () => {
   it("applies default limit", () => {

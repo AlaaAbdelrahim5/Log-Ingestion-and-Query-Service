@@ -21,7 +21,6 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/src/db/migrations ./src/db/migrations
-COPY --from=build /app/src/app ./src/app
 
 EXPOSE 8080
 

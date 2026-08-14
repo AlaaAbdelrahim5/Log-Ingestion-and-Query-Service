@@ -1,10 +1,6 @@
-import { aggregateLogs, queryLogs } from "../db/queries/logs.js";
-import {
-  encodeCursor,
-  parseAggregateQuery,
-  parseLogQuery,
-} from "../utils/parse-query.js";
-import { LogResponse, QueryLogsResult, AggregateLogsResult } from "../utils/types.js";
+import { queryLogs } from "../db/queries/logs.js";
+import { LogResponse, QueryLogsResult } from "../utils/types.js";
+import { encodeCursor, parseLogQuery } from "../validation/parse-query.js";
 
 export async function queryLogsService(
   query: Record<string, unknown>,
@@ -20,21 +16,6 @@ export async function queryLogsService(
     logs: page.map(toLogResponse),
     next_cursor:
       hasMore && last ? encodeCursor(toDate(last.timestamp), last.id) : null,
-  };
-}
-
-export async function aggregateLogsService(
-  query: Record<string, unknown>,
-): Promise<AggregateLogsResult> {
-  const filters = parseAggregateQuery(query);
-  const rows = await aggregateLogs(filters);
-
-  return {
-    buckets: rows.map((row) => ({
-      start: formatBucketStart(toDate(row.start)),
-      group: row.group ?? null,
-      count: Number(row.count),
-    })),
   };
 }
 
@@ -58,8 +39,4 @@ function toLogResponse(row: {
 
 function toDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
-}
-
-function formatBucketStart(date: Date): string {
-  return date.toISOString().replace(/\.000Z$/, "Z");
 }

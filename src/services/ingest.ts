@@ -2,7 +2,7 @@ import { insertLogs } from "../db/queries/logs.js";
 import { NewLog } from "../db/schema.js";
 import { BadRequestError } from "../utils/errors.js";
 import { IngestResult, RejectedEntry } from "../utils/types.js";
-import { validateLogEntry } from "../utils/validate-log.js";
+import { validateLogEntry } from "../validation/validate-log.js";
 
 export async function ingestLogs(body: unknown): Promise<IngestResult> {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {

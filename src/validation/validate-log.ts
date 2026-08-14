@@ -6,8 +6,8 @@ export const LOG_LEVELS: ReadonlySet<string> = new Set([
   "warn",
   "error",
 ]);
-const MAX_FUTURE_MS = 5 * 60 * 1000;
 
+const MAX_FUTURE_MS = 5 * 60 * 1000;
 const ISO_8601 =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -96,7 +96,11 @@ function validateAttributes(attributes: unknown): string | undefined {
 
   for (const value of Object.values(attributes as Record<string, unknown>)) {
     const valueType = typeof value;
-    if (valueType !== "string" && valueType !== "number" && valueType !== "boolean") {
+    if (
+      valueType !== "string" &&
+      valueType !== "number" &&
+      valueType !== "boolean"
+    ) {
       return "attributes values must be strings, numbers, or booleans";
     }
     if (valueType === "number" && !Number.isFinite(value)) {

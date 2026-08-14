@@ -1,11 +1,11 @@
 import { and, asc, count, desc, eq, gte, ilike, lt, sql, SQL } from "drizzle-orm";
-import { db } from "../index.js";
-import { logs, NewLog } from "../schema.js";
 import {
   AggregateQueryFilters,
   BucketSize,
   LogQueryFilters,
 } from "../../utils/types.js";
+import { db } from "../index.js";
+import { logs, NewLog } from "../schema.js";
 
 const BUCKET_SECONDS: Record<BucketSize, number> = {
   "1m": 60,

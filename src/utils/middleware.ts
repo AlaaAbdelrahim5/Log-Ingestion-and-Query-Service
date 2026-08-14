@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 import {
   BadRequestError,
-  UnauthorizedError,
   ForbiddenError,
   NotFoundError,
+  UnauthorizedError,
 } from "./errors.js";
 
 export function logResponsesMiddleware(
@@ -27,8 +27,6 @@ export function errorHandlerMiddleware(
   res: Response,
   next: NextFunction,
 ) {
-  console.log(err);
-
   if (err instanceof SyntaxError || isJsonParseError(err)) {
     return res.status(400).json({
       error: "malformed JSON",
@@ -59,6 +57,7 @@ export function errorHandlerMiddleware(
     });
   }
 
+  console.error(err);
   return res.status(500).json({
     error: "Internal server error",
   });

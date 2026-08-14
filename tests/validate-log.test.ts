@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateLogEntry } from "../src/utils/validate-log.js";
+import { validateLogEntry } from "../src/validation/validate-log.js";
 
 describe("validateLogEntry", () => {
   const valid = {

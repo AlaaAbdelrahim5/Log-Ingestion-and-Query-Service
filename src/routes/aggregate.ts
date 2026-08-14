@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { aggregateLogsService } from "../services/query.service.js";
+import { aggregateLogsService } from "../services/aggregate.js";
 
 export async function handlerAggregateLogs(req: Request, res: Response) {
   const result = await aggregateLogsService(
