@@ -1,4 +1,9 @@
 {
-  "explorer.sortOrder": "type",
-  "explorer.sortOrderLexicographicOptions": "default"
+  "explorer.sortOrder": "foldersNestsFiles",
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "package.json": "package-lock.json",
+    "docker-compose.yml": "Dockerfile,.dockerignore",
+    "tsconfig.json": "vitest.config.ts"
+  }
 }

@@ -1,4 +1,4 @@
-import { NewLog } from "../db/schema.js";
+import { NewLog } from "../types.js";
 
 export const LOG_LEVELS: ReadonlySet<string> = new Set([
   "debug",
@@ -9,19 +9,19 @@ export const LOG_LEVELS: ReadonlySet<string> = new Set([
 
 const MAX_FUTURE_MS = 5 * 60 * 1000;
 const ISO_8601 =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/i;
 
 export function parseIso8601Timestamp(value: string): Date | undefined {
   if (!ISO_8601.test(value)) {
     return undefined;
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) {
     return undefined;
   }
 
-  return date;
+  return new Date(ms);
 }
 
 export function validateLogEntry(entry: unknown): NewLog | string {
@@ -38,11 +38,14 @@ export function validateLogEntry(entry: unknown): NewLog | string {
     return "timestamp must be a valid ISO 8601 timestamp";
   }
 
-  const timestamp = parseIso8601Timestamp(log.timestamp);
-  if (!timestamp) {
+  if (!ISO_8601.test(log.timestamp)) {
     return "timestamp must be a valid ISO 8601 timestamp";
   }
-  if (timestamp.getTime() > Date.now() + MAX_FUTURE_MS) {
+  const timestampMs = Date.parse(log.timestamp);
+  if (Number.isNaN(timestampMs)) {
+    return "timestamp must be a valid ISO 8601 timestamp";
+  }
+  if (timestampMs > Date.now() + MAX_FUTURE_MS) {
     return "timestamp must not be more than five minutes in the future";
   }
 
@@ -67,21 +70,21 @@ export function validateLogEntry(entry: unknown): NewLog | string {
     return "message must be a non-empty string";
   }
 
-  let attributes: NewLog["attributes"];
+  let attributesJson = "{}";
   if (log.attributes !== undefined) {
     const attrsReason = validateAttributes(log.attributes);
     if (attrsReason) {
       return attrsReason;
     }
-    attributes = log.attributes as NewLog["attributes"];
+    attributesJson = JSON.stringify(log.attributes);
   }
 
   return {
-    timestamp,
+    timestamp: log.timestamp,
     level: log.level as NewLog["level"],
     service: log.service,
     message: log.message,
-    attributes: attributes ?? {},
+    attributesJson,
   };
 }
 

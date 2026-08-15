@@ -1,7 +1,6 @@
-import { insertLogs } from "../db/queries/logs.js";
-import { NewLog } from "../db/schema.js";
+import { insertLogs } from "../db/logs.js";
+import { IngestResult, NewLog, RejectedEntry } from "../types.js";
 import { BadRequestError } from "../utils/errors.js";
-import { IngestResult, RejectedEntry } from "../utils/types.js";
 import { validateLogEntry } from "../validation/validate-log.js";
 
 export async function ingestLogs(body: unknown): Promise<IngestResult> {

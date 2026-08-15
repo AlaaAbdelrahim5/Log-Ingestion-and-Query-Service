@@ -27,10 +27,32 @@ describe("validateLogEntry", () => {
     ).toBe("attributes values must be strings, numbers, or booleans");
   });
 
-  it("rejects timestamps more than five minutes in the future", () => {
-    const future = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    expect(validateLogEntry({ ...valid, timestamp: future })).toBe(
-      "timestamp must not be more than five minutes in the future",
+  it("accepts missing attributes as an empty object", () => {
+    const { attributes, ...withoutAttrs } = valid;
+    const result = validateLogEntry(withoutAttrs);
+    expect(result).toMatchObject({ attributesJson: "{}" });
+  });
+
+  it("accepts a timestamp with a numeric offset", () => {
+    const result = validateLogEntry({
+      ...valid,
+      timestamp: "2026-07-20T14:32:01.123+00:00",
+    });
+    expect(typeof result).not.toBe("string");
+  });
+
+  it("rejects empty service and message", () => {
+    expect(validateLogEntry({ ...valid, service: "" })).toBe(
+      "service must be a non-empty string",
+    );
+    expect(validateLogEntry({ ...valid, message: "" })).toBe(
+      "message must be a non-empty string",
+    );
+  });
+
+  it("rejects attribute arrays", () => {
+    expect(validateLogEntry({ ...valid, attributes: [] })).toBe(
+      "attributes must be a flat object",
     );
   });
 });

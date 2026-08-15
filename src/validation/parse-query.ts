@@ -1,16 +1,15 @@
-import { BadRequestError } from "../utils/errors.js";
 import {
   AggregateQueryFilters,
   BucketSize,
   GroupBy,
   LogQueryFilters,
-} from "../utils/types.js";
+} from "../types.js";
+import { BadRequestError } from "../utils/errors.js";
 import { LOG_LEVELS, parseIso8601Timestamp } from "./validate-log.js";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ID_RE = /^\d+$/;
 const BUCKET_SIZES = new Set<BucketSize>(["1m", "5m", "1h", "1d"]);
 const GROUP_BY_VALUES = new Set<GroupBy>(["service", "level"]);
 
@@ -96,7 +95,7 @@ function decodeCursor(cursor: string): { timestamp: Date; id: string } {
       Buffer.from(cursor, "base64url").toString("utf8"),
     ) as { id?: unknown; timestamp?: unknown };
 
-    if (typeof parsed.id !== "string" || !UUID_RE.test(parsed.id)) {
+    if (typeof parsed.id !== "string" || !ID_RE.test(parsed.id)) {
       throw new Error("invalid id");
     }
     if (typeof parsed.timestamp !== "string") {

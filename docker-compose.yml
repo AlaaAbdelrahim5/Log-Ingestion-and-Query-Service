@@ -10,9 +10,55 @@ services:
       - -c
       - shared_buffers=256MB
       - -c
-      - max_connections=50
+      - effective_cache_size=768MB
       - -c
-      - work_mem=8MB
+      - maintenance_work_mem=64MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - wal_buffers=16MB
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - min_wal_size=256MB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=off
+      - -c
+      - wal_level=minimal
+      - -c
+      - max_wal_senders=0
+      - -c
+      - max_replication_slots=0
+      - -c
+      - full_page_writes=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - jit=off
+      - -c
+      - max_connections=20
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - seq_page_cost=1.0
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - max_parallel_workers=0
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - max_worker_processes=2
+      - -c
+      - autovacuum_vacuum_scale_factor=0.2
+      - -c
+      - autovacuum_analyze_scale_factor=0.05
+      - -c
+      - autovacuum_analyze_threshold=2000
     cpus: 1.0
     mem_limit: 1g
     healthcheck:
@@ -28,6 +74,8 @@ services:
     environment:
       DB_URL: postgres://postgres:postgres@db:5432/logs
       RETENTION_DAYS: "30"
+      RETENTION_INTERVAL_MS: "300000"
+      NODE_ENV: production
     depends_on:
       db:
         condition: service_healthy

@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { deleteExpiredLogs } from "../db/queries/logs.js";
+import { deleteExpiredLogs } from "../db/logs.js";
 
 export function startRetentionWorker(): void {
   const tick = async () => {
@@ -17,8 +17,10 @@ export function startRetentionWorker(): void {
     }
   };
 
-  void tick();
-  setInterval(tick, config.retention.intervalMs);
+  setTimeout(() => {
+    void tick();
+    setInterval(tick, config.retention.intervalMs);
+  }, config.retention.intervalMs);
 }
 
 export async function runRetentionPass(): Promise<void> {

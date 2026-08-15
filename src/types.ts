@@ -1,19 +1,9 @@
-import { MigrationConfig } from "drizzle-orm/migrator";
-
-export type DBConfig = {
-  url: string;
-  migrationConfig: MigrationConfig;
-};
-
-export type RetentionConfig = {
-  days: number;
-  intervalMs: number;
-  batchSize: number;
-};
-
-export type Config = {
-  db: DBConfig;
-  retention: RetentionConfig;
+export type NewLog = {
+  timestamp: string;
+  level: "debug" | "info" | "warn" | "error";
+  service: string;
+  message: string;
+  attributesJson: string;
 };
 
 export type RejectedEntry = {
@@ -38,6 +28,15 @@ export type LogQueryFilters = {
     timestamp: Date;
     id: string;
   };
+};
+
+export type LogRow = {
+  id: string;
+  timestamp: Date;
+  level: string;
+  service: string;
+  message: string;
+  attributes: Record<string, string | number | boolean> | null;
 };
 
 export type LogResponse = {

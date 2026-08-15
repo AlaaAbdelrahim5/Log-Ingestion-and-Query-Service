@@ -1,5 +1,5 @@
-import { queryLogs } from "../db/queries/logs.js";
-import { LogResponse, QueryLogsResult } from "../utils/types.js";
+import { queryLogs } from "../db/logs.js";
+import { LogResponse, QueryLogsResult } from "../types.js";
 import { encodeCursor, parseLogQuery } from "../validation/parse-query.js";
 
 export async function queryLogsService(
@@ -15,26 +15,52 @@ export async function queryLogsService(
   return {
     logs: page.map(toLogResponse),
     next_cursor:
-      hasMore && last ? encodeCursor(toDate(last.timestamp), last.id) : null,
+      hasMore && last
+        ? encodeCursor(toDate(last.timestamp), String(last.id))
+        : null,
   };
 }
 
 function toLogResponse(row: {
-  id: string;
+  id: string | number;
   timestamp: Date | string;
   level: string;
   service: string;
   message: string;
-  attributes: Record<string, string | number | boolean> | null;
+  attributes: Record<string, string | number | boolean> | string | null;
 }): LogResponse {
   return {
-    id: row.id,
+    id: String(row.id),
     timestamp: toDate(row.timestamp).toISOString(),
     level: row.level,
     service: row.service,
     message: row.message,
-    attributes: row.attributes ?? {},
+    attributes: toAttributes(row.attributes),
   };
+}
+
+function toAttributes(
+  value: Record<string, string | number | boolean> | string | null | undefined,
+): Record<string, string | number | boolean> {
+  if (value === null || value === undefined) {
+    return {};
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+      ) {
+        return parsed as Record<string, string | number | boolean>;
+      }
+    } catch {
+      return {};
+    }
+    return {};
+  }
+  return value;
 }
 
 function toDate(value: Date | string): Date {

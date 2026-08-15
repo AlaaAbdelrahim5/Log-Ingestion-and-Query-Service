@@ -1,5 +1,5 @@
-import { aggregateLogs } from "../db/queries/logs.js";
-import { AggregateLogsResult } from "../utils/types.js";
+import { aggregateLogs } from "../db/logs.js";
+import { AggregateLogsResult } from "../types.js";
 import { parseAggregateQuery } from "../validation/parse-query.js";
 
 export async function aggregateLogsService(
@@ -9,11 +9,18 @@ export async function aggregateLogsService(
   const rows = await aggregateLogs(filters);
 
   return {
-    buckets: rows.map((row) => ({
-      start: formatBucketStart(toDate(row.start)),
-      group: row.group ?? null,
-      count: Number(row.count),
-    })),
+    buckets: rows.map((row) => {
+      const record = row as {
+        start: Date | string;
+        group?: string | null;
+        count: number;
+      };
+      return {
+        start: formatBucketStart(toDate(record.start)),
+        group: record.group ?? null,
+        count: Number(record.count),
+      };
+    }),
   };
 }
 

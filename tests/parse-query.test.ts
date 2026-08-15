@@ -35,13 +35,28 @@ describe("parseLogQuery", () => {
     );
   });
 
-  it("accepts a well-formed cursor", () => {
-    const cursor = encodeCursor(
-      new Date("2026-07-20T14:32:01.123Z"),
-      "11111111-1111-1111-1111-111111111111",
-    );
+  it("accepts a well-formed numeric cursor", () => {
+    const cursor = encodeCursor(new Date("2026-07-20T14:32:01.123Z"), "42");
     const filters = parseLogQuery({ cursor });
-    expect(filters.cursor?.id).toBe("11111111-1111-1111-1111-111111111111");
+    expect(filters.cursor?.id).toBe("42");
+  });
+
+  it("allows until equal to since", () => {
+    expect(
+      parseLogQuery({
+        since: "2026-07-20T14:00:00Z",
+        until: "2026-07-20T14:00:00Z",
+      }).until?.toISOString(),
+    ).toBe("2026-07-20T14:00:00.000Z");
+  });
+
+  it("rejects limit 0 and limit 1001", () => {
+    expect(() => parseLogQuery({ limit: "0" })).toThrow(/between 1 and 1000/);
+    expect(() => parseLogQuery({ limit: "1001" })).toThrow(/between 1 and 1000/);
+  });
+
+  it("rejects a non-numeric limit", () => {
+    expect(() => parseLogQuery({ limit: "10.5" })).toThrow(/limit must be a number/);
   });
 });
 
