@@ -165,47 +165,58 @@ Each pass deletes by primary key from a timestamp-ordered `LIMIT`ed subquery so 
 
 ## Load-test methodology and measured results
 
-**Test environment:** this Compose stack (app 0.5 CPU / 256 MB, Postgres 1 CPU / 1 GB) on WSL2.
+**Test environment:** official Foothill load generator ([submission `61XEZYVVYYKHHPY096GRNJD8YZ`](https://loadgen.foothilltech.net/submission/61XEZYVVYYKHHPY096GRNJD8YZ)), commit `2ff5512f`, tester `performance-v4` / scoring `2026-08-09.v7`. Resource limits match Compose: app 0.5 CPU / 256 MB, PostgreSQL 1 CPU / 1 GB.
 
-**Official generator** ([this submission](https://loadgen.foothilltech.net/submission/4NPJBYZZZFC55VN3A0QQDN5AG9)), before the current ingest/query rewrite:
+**Overall score:** 59.97 — correctness **15/15**, reliability **20/20**, queries **6/15**, performance **18.97/50**. Eligible; all contract checks passed.
 
-| Scenario | Logs/s | Aggregate p95 | POST success | Eventual consistency |
-| --- | --- | --- | --- | --- |
-| Load (15k/s × 120s) | **1,299** | 8.40s | 100% | Failed (`GET /logs` **500**, 1k visible / 156k accepted) |
-| Stress | 616 | 16.50s | 100% | Failed |
-| Spike | 471 | 10.21s | 100% | Failed |
-| Breakpoint | 413 | 27.95s | 100% | Failed |
-
-Postgres CPU was pegged at ~100%. The query path broke after the first page, which is why consistency and query scores collapsed even though every POST returned 200.
-
-**Local retest of this revision** (concurrent `POST /logs` plus one `GET /logs/aggregate` per second, then cursor pagination):
+**Load scenario (primary grade):** 15,000 logs/s target for 120s, plus one aggregate request per second while ingest is running.
 
 | Item | Result |
 | --- | --- |
-| Dataset size | ~162k rows ingested in the timed run |
-| Batch size | 500 logs/request, 24 concurrent clients |
-| Ingestion rate | ~**13,000 logs/s** over 12.5s, 0 HTTP errors |
-| Query rate | 1 `GET /logs/aggregate` per second during ingest, then cursor pagination |
-| Ingest latency | p50 ~886 ms, p95 ~1.35 s (requests wait on coalesced flushes) |
-| Query latency | aggregate p95 **~358 ms** (`bucket=1m`); list pages p95 ~62 ms, **163 pages, 0 errors** |
-| Visibility | all accepted rows readable after ingest (no missing records) |
-| Resource usage | App well under 256 MB; Postgres is the remaining ingest bottleneck |
+| Dataset size | **357,400** logs accepted (0 rejected) |
+| Batch size | generator default (multi-entry `POST /logs` batches) |
+| Ingestion rate | **2,978 logs/s** average (peak **12,600 logs/s** at t=5s, then degraded) |
+| Query rate | 1 `GET /logs/aggregate` per second during ingest |
+| Ingest latency | p95 **189 ms** |
+| Query latency | aggregate p95 **5,006 ms** (spec target under 1s) |
+| HTTP / POST | 0 HTTP errors, POST success **100%**, no dropped batches |
+| Visibility | eventual consistency **passed**: 357,400 / 357,400 visible in **10.5s** (spec ≤ 20s); live read-after-write during ingest was **0.76%** |
+| Resource usage | App CPU max **48%** / avg **8.5%**, memory max **52 MB**. Postgres CPU max **101%** / avg **77%**, memory max **256 MB** |
 
-**Optimizations applied after that official run:**
+**Other generator scenarios** (same stack; 0 HTTP errors and 0 missing records in every case):
 
-- Ingest uses Postgres `COPY FROM STDIN` (not per-row ORM inserts), with concurrent POSTs coalesced into larger flushes
+| Scenario | Target | Logs accepted | Logs/s | Ingest p95 | Aggregate p95 | Consistency drain |
+| --- | --- | --- | --- | --- | --- | --- |
+| Load | 15k/s × 120s | 357,400 | 2,978 | 189 ms | 5.01 s | 10.5 s |
+| Stress | 15k → 22.5k → 30k/s | 221,500 | 1,477 | 272 ms | 9.69 s | 4.7 s |
+| Spike | 7.5k with 30k burst | 109,300 | 1,093 | 195 ms | 6.01 s | 1.9 s |
+| Breakpoint | 15k → 45k/s | 118,300 | 986 | 423 ms | 15.00 s | 2.2 s |
+
+Postgres memory grew across scenarios (breakpoint max **334 MB**). The 15k/s threshold was **not** met in any scenario.
+
+**Bottlenecks discovered**
+
+- Postgres CPU is the ceiling: it sits near 100% while the app stays well under its 0.5 CPU / 256 MB cap.
+- Throughput spikes early (12.6k/s) then falls as WAL, btree, and concurrent aggregates compete on one CPU.
+- Aggregates during ingest miss the 1s p95 target (~5s on load, worse under stress/breakpoint), which is the main query-score drag.
+- Live read-after-write during ingest is low because coalesced `COPY` flushes lag the generator’s immediate GET; after ingest stops, every accepted row is visible within 20s.
+
+**Optimizations applied**
+
+- Ingest uses Postgres `COPY FROM STDIN` (not per-row inserts), with concurrent POSTs coalesced into larger flushes
 - `bigint IDENTITY` keys; listing uses `id::text` so cursors stay valid
 - ASC `(timestamp, id)` btree + BRIN on `timestamp`
 - Aggregates use `date_bin`
 - Postgres: `jit=off`, `wal_level=minimal`, `synchronous_commit=off`, larger WAL, no extra btree on `service`
 - Retention does not run during the first minutes of a fresh start
 
-Push this revision and resubmit at https://loadgen.foothilltech.net/ — rank is computed from a new generator run, not from README figures.
-
-Baseline spec targets: ≥ 15,000 logs/s, aggregation p95 < 1s at ~1M rows, newly ingested rows queryable within 20s, one aggregate request per second during ingest.
+Baseline spec targets: at least 15,000 logs/s, aggregation p95 under 1s at about 1M rows, newly ingested rows queryable within 20s, one aggregate request per second during ingest. This run meets durability, zero-drop ingest, and the 20s visibility deadline; it does not yet meet 15k/s or aggregate p95 under 1s under concurrent load.
 
 ## Known limitations
 
+- Sustained ingest is ~3k logs/s on the official generator versus the 15k/s target; Postgres CPU is saturated.
+- Aggregate p95 is ~5s during the load scenario (worse under stress), above the 1s target.
+- Live read-after-write during ingest is low; rows become fully queryable after the flush drain (passed within 20s).
 - `q` uses `ILIKE` and will not use the btree indexes.
 - Attribute filters are not index-backed.
 - Empty aggregation buckets are omitted (allowed).
