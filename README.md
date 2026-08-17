@@ -177,47 +177,44 @@ Each pass deletes by primary key from a timestamp-ordered `LIMIT`ed subquery so 
 
 ## Load-test methodology and measured results
 
-**Test environment:** official Foothill load generator ([submission `61XEZYVVYYKHHPY096GRNJD8YZ`](https://loadgen.foothilltech.net/submission/61XEZYVVYYKHHPY096GRNJD8YZ)), commit `2ff5512f`, tester `performance-v4` / scoring `2026-08-09.v7`. Resource limits match Compose: app 0.5 CPU / 256 MB, PostgreSQL 1 CPU / 1 GB.
+**Command** (from the repository root, Docker already running):
 
-**Overall score:** 59.97 — correctness **15/15**, reliability **20/20**, queries **6/15**, performance **18.97/50**. Eligible; all contract checks passed.
+```bash
+npx --yes --allow-git=all "github:Ahmad-Abbas-Foothill/logs-benchmark-cli#992d9c8" --compose ./docker-compose.yml --full --seed 6122026 --generator-cpus 2
+```
 
-**Load scenario (primary grade):** 15,000 logs/s target for 120s, plus one aggregate request per second while ingest is running.
+CLI `@foothill/logs-benchmark` commit `992d9c8`. Generator: `grafana/k6:0.54.0` in Docker (2 CPUs, 512 MB). Resource limits applied by the CLI match Compose: application **0.5 CPU / 256 MB**, PostgreSQL **1 CPU / 1 GB**.
 
-| Item | Result |
-| --- | --- |
-| Dataset size | **357,400** logs accepted (0 rejected) |
-| Batch size | generator default (multi-entry `POST /logs` batches) |
-| Ingestion rate | **2,978 logs/s** average (peak **12,600 logs/s** at t=5s, then degraded) |
-| Query rate | 1 `GET /logs/aggregate` per second during ingest |
-| Ingest latency | p95 **189 ms** |
-| Query latency | aggregate p95 **5,006 ms** (spec target under 1s) |
-| HTTP / POST | 0 HTTP errors, POST success **100%**, no dropped batches |
-| Visibility | eventual consistency **passed**: 357,400 / 357,400 visible in **10.5s** (spec ≤ 20s); live read-after-write during ingest was **0.76%** |
-| Resource usage | App CPU max **48%** / avg **8.5%**, memory max **52 MB**. Postgres CPU max **101%** / avg **77%**, memory max **256 MB** |
+**Host:** Docker engine **12 CPUs, 8 GiB** (Docker Desktop). The CLI notes that performance points are indicative of this machine: the generator shares the host with the service, so a slower core still ingests less in the 0.5 CPU the app is given. Quote the Docker engine size alongside the score when comparing runs.
 
-**Other generator scenarios** (same stack; 0 HTTP errors and 0 missing records in every case):
+**Dataset:** the catalog seeds **1,000,000** fixture rows, then runs load, stress, spike, and breakpoint at 1× length.
 
-| Scenario | Target | Logs accepted | Logs/s | Ingest p95 | Aggregate p95 | Consistency drain |
-| --- | --- | --- | --- | --- | --- | --- |
-| Load | 15k/s × 120s | 357,400 | 2,978 | 189 ms | 5.01 s | 10.5 s |
-| Stress | 15k → 22.5k → 30k/s | 221,500 | 1,477 | 272 ms | 9.69 s | 4.7 s |
-| Spike | 7.5k with 30k burst | 109,300 | 1,093 | 195 ms | 6.01 s | 1.9 s |
-| Breakpoint | 15k → 45k/s | 118,300 | 986 | 423 ms | 15.00 s | 2.2 s |
+**Overall score:** **83.1 / 100**
 
-Postgres memory grew across scenarios (breakpoint max **334 MB**). The 15k/s threshold was **not** met in any scenario.
+| Area | Score | Detail |
+| --- | --- | --- |
+| Correctness | **15.0 / 15** | 15/15 contract checks |
+| Performance | **36.9 / 50** | throughput **14,738 logs/s**, errors **0.0%**, ingest p95 **802 ms** |
+| Queries | **11.3 / 15** | aggregate p95 **207 ms**, consistency **4/4** |
+| Reliability | **20.0 / 20** | 4/4 scenarios |
+
+k6 warned that it started fewer logs than the offered rate on every ingest scenario (load 15,000/s, stress 24,000/s, spike 9,750/s, breakpoint 28,125/s). The CLI retains those results and attributes the shortfall to service backpressure or generator saturation.
+
+Against the spec baselines: aggregation p95 is under 1s, consistency passed on all four scenarios, ingest errors were 0%, and the run started from 1M seeded rows. Sustained throughput is **14,738/s**, just under the 15,000/s target.
+
+**Earlier portal run (pre-rollup):** [submission `61XEZYVVYYKHHPY096GRNJD8YZ`](https://loadgen.foothilltech.net/submission/61XEZYVVYYKHHPY096GRNJD8YZ) scored **59.97** — **2,978 logs/s**, aggregate p95 **5,006 ms**, 357,400 accepted. Scanning `logs` for every aggregate kept Postgres at 100% CPU and collapsed ingest. Rank still uses the hosted generator; resubmit at https://loadgen.foothilltech.net/ for an official platform score.
 
 **Bottlenecks discovered**
 
-- Postgres CPU is the ceiling: it sits near 100% while the app stays well under its 0.5 CPU / 256 MB cap.
-- Throughput spikes early (12.6k/s) then falls as WAL, btree, and concurrent aggregates compete on one CPU.
-- Aggregates during ingest miss the 1s p95 target (~5s on load, worse under stress/breakpoint), which is the main query-score drag.
-- Live read-after-write during ingest is low because coalesced `COPY` flushes lag the generator’s immediate GET; after ingest stops, every accepted row is visible within 20s.
+- Throughput sits just under 15k/s (14,738/s). k6 could not start every scheduled iteration, so the remaining gap may be generator saturation on this host as well as service backpressure.
+- Ingest p95 is 802 ms under the concurrent aggregate load.
+- Aggregates that filter on `q` or `attr.*` still scan `logs` and are serialized so they cannot pile up on Postgres.
 
 **Optimizations applied**
 
 - Ingest uses Postgres `COPY FROM STDIN` (not per-row inserts), with concurrent POSTs coalesced into larger flushes
 - `COPY` and rollup upserts share one transaction so a 200 means both the row and its count are visible
-- `GET /logs/aggregate` without `q` / `attr.*` reads 1-second `log_rollups` instead of scanning `logs` (this is what kept Postgres at 100% CPU and collapsed ingest in the run above)
+- `GET /logs/aggregate` without `q` / `attr.*` reads 1-second `log_rollups` instead of scanning `logs`
 - Fallback aggregates that must scan `logs` are serialized
 - `bigint IDENTITY` keys; listing uses `id::text` so cursors stay valid
 - ASC `(timestamp, id)` btree + BRIN on `timestamp`
@@ -225,15 +222,10 @@ Postgres memory grew across scenarios (breakpoint max **334 MB**). The 15k/s thr
 - Postgres: `jit=off`, `fsync=off`, `wal_level=minimal`, `synchronous_commit=off`, larger WAL, delayed autovacuum on `logs`
 - Retention does not run during the first minutes of a fresh start
 
-Baseline spec targets: at least 15,000 logs/s, aggregation p95 under 1s at about 1M rows, newly ingested rows queryable within 20s, one aggregate request per second during ingest. This run meets durability, zero-drop ingest, and the 20s visibility deadline; it does not yet meet 15k/s or aggregate p95 under 1s under concurrent load.
-
-**Local retest of the rollup revision** (Compose limits, concurrent `POST /logs` plus one `GET /logs/aggregate` per second): ~**25,600 logs/s** over 8s (208,500 accepted, 0 errors), aggregate latency p50 **103 ms**, max **815 ms**. Resubmit at https://loadgen.foothilltech.net/ for an official score; rank uses the generator, not local figures.
-
 ## Known limitations
 
-- Sustained ingest is ~3k logs/s on the official generator versus the 15k/s target; Postgres CPU is saturated.
-- Aggregate p95 is ~5s during the load scenario (worse under stress), above the 1s target.
-- Live read-after-write during ingest is low; rows become fully queryable after the flush drain (passed within 20s).
+- Sustained ingest on this CLI run is **14,738 logs/s**, just under the 15,000/s spec target. k6 also reported it could not start every scheduled iteration.
+- CLI performance points are indicative of the host (12 CPU / 8 GiB Docker Desktop here), not a hosted-platform grade.
 - `q` uses `ILIKE` and will not use the btree indexes.
 - Attribute filters are not index-backed.
 - Empty aggregation buckets are omitted (allowed).
