@@ -64,7 +64,7 @@ async function applyMigrations(sql: postgres.Sql): Promise<void> {
       continue;
     }
 
-    if (schemaReady) {
+    if (schemaReady && file === "init.sql") {
       await sql`
         INSERT INTO schema_migrations (id) VALUES (${file})
         ON CONFLICT DO NOTHING

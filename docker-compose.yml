@@ -40,6 +40,8 @@ services:
       - -c
       - jit=off
       - -c
+      - fsync=off
+      - -c
       - max_connections=20
       - -c
       - random_page_cost=1.1

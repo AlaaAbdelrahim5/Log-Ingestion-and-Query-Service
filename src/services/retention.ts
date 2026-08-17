@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { deleteExpiredLogs } from "../db/logs.js";
+import { deleteExpiredLogs, deleteExpiredRollups } from "../db/logs.js";
 
 export function startRetentionWorker(): void {
   const tick = async () => {
@@ -27,6 +27,8 @@ export async function runRetentionPass(): Promise<void> {
   const cutoff = new Date(
     Date.now() - config.retention.days * 24 * 60 * 60 * 1000,
   );
+
+  await deleteExpiredRollups(cutoff);
 
   let deleted = 0;
   do {

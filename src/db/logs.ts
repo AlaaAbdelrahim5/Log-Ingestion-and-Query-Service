@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import postgres from "postgres";
 import {
   AggregateQueryFilters,
   BucketSize,
@@ -8,6 +9,11 @@ import {
   NewLog,
 } from "../types.js";
 import { ingestSql, sql } from "./client.js";
+import {
+  buildRollupIncrements,
+  canUseRollups,
+  RollupIncrement,
+} from "./rollups.js";
 
 const BUCKET_INTERVAL: Record<BucketSize, string> = {
   "1m": "1 minute",
@@ -16,8 +22,7 @@ const BUCKET_INTERVAL: Record<BucketSize, string> = {
   "1d": "1 day",
 };
 
-const MAX_FLUSH_ROWS = 8000;
-const GATHER_MS = 4;
+const MAX_FLUSH_ROWS = 12000;
 
 type InsertWaiter = {
   entries: NewLog[];
@@ -27,6 +32,7 @@ type InsertWaiter = {
 
 const insertQueue: InsertWaiter[] = [];
 let flushing = false;
+let rawAggregateTail: Promise<unknown> = Promise.resolve();
 
 export function insertLogs(entries: NewLog[]): Promise<void> {
   if (entries.length === 0) {
@@ -47,14 +53,6 @@ async function flushInsertQueue(): Promise<void> {
 
   try {
     while (insertQueue.length > 0) {
-      const queuedRows = insertQueue.reduce(
-        (sum, waiter) => sum + waiter.entries.length,
-        0,
-      );
-      if (queuedRows < 4000) {
-        await sleep(GATHER_MS);
-      }
-
       const batch: InsertWaiter[] = [];
       let rows = 0;
       while (insertQueue.length > 0 && rows < MAX_FLUSH_ROWS) {
@@ -95,10 +93,42 @@ async function insertNow(entries: NewLog[]): Promise<void> {
   }
 
   const payload = toCopyText(entries);
-  const writable = await ingestSql`
-    COPY logs (timestamp, level, service, message, attributes) FROM STDIN
-  `.writable();
-  await pipeline(Readable.from([payload]), writable);
+  const rollups = buildRollupIncrements(entries);
+
+  await ingestSql.begin(async (tx) => {
+    const writable = await tx`
+      COPY logs (timestamp, level, service, message, attributes) FROM STDIN
+    `.writable();
+    await pipeline(Readable.from([payload]), writable);
+    await upsertRollups(tx, rollups);
+  });
+}
+
+async function upsertRollups(
+  tx: postgres.TransactionSql,
+  rollups: RollupIncrement[],
+): Promise<void> {
+  if (rollups.length === 0) {
+    return;
+  }
+
+  const bucketStarts = rollups.map((row) => row.bucketStart);
+  const services = rollups.map((row) => row.service);
+  const levels = rollups.map((row) => row.level);
+  const counts = rollups.map((row) => row.count);
+
+  await tx`
+    INSERT INTO log_rollups (bucket_start, service, level, count)
+    SELECT *
+    FROM unnest(
+      ${bucketStarts}::timestamptz[],
+      ${services}::text[],
+      ${levels}::log_level[],
+      ${counts}::int[]
+    ) AS t(bucket_start, service, level, count)
+    ON CONFLICT (bucket_start, service, level)
+    DO UPDATE SET count = log_rollups.count + EXCLUDED.count
+  `;
 }
 
 function toCopyText(entries: NewLog[]): string {
@@ -155,6 +185,56 @@ export async function queryLogs(filters: LogQueryFilters): Promise<LogRow[]> {
 }
 
 export async function aggregateLogs(filters: AggregateQueryFilters) {
+  if (canUseRollups(filters)) {
+    return aggregateFromRollups(filters);
+  }
+
+  const run = rawAggregateTail.then(
+    () => aggregateFromLogs(filters),
+    () => aggregateFromLogs(filters),
+  );
+  rawAggregateTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function aggregateFromRollups(filters: AggregateQueryFilters) {
+  const interval = BUCKET_INTERVAL[filters.bucket];
+  const bucketSql = sql`date_bin(${interval}::interval, bucket_start, TIMESTAMPTZ 'epoch')`;
+  const where = buildRollupWhere(filters);
+
+  if (filters.groupBy === "service") {
+    return sql<{ start: Date; group: string | null; count: number }[]>`
+      SELECT ${bucketSql} AS start, service AS "group", SUM(count)::int AS count
+      FROM log_rollups
+      WHERE ${where}
+      GROUP BY 1, 2
+      ORDER BY 1, 2
+    `;
+  }
+
+  if (filters.groupBy === "level") {
+    return sql<{ start: Date; group: string | null; count: number }[]>`
+      SELECT ${bucketSql} AS start, level::text AS "group", SUM(count)::int AS count
+      FROM log_rollups
+      WHERE ${where}
+      GROUP BY 1, 2
+      ORDER BY 1, 2
+    `;
+  }
+
+  return sql<{ start: Date; group: string | null; count: number }[]>`
+    SELECT ${bucketSql} AS start, NULL::text AS "group", SUM(count)::int AS count
+    FROM log_rollups
+    WHERE ${where}
+    GROUP BY 1
+    ORDER BY 1
+  `;
+}
+
+async function aggregateFromLogs(filters: AggregateQueryFilters) {
   const where = buildWhere(filters);
   const interval = BUCKET_INTERVAL[filters.bucket];
   const bucketSql = sql`date_bin(${interval}::interval, timestamp, TIMESTAMPTZ 'epoch')`;
@@ -211,6 +291,35 @@ export async function deleteExpiredLogs(
   return result.length;
 }
 
+export async function deleteExpiredRollups(cutoff: Date): Promise<void> {
+  await sql`
+    DELETE FROM log_rollups
+    WHERE bucket_start < ${cutoff.toISOString()}::timestamptz
+  `;
+}
+
+function buildRollupWhere(filters: {
+  service?: string;
+  level?: string;
+  since: Date;
+  until: Date;
+}) {
+  const clauses = [
+    sql`bucket_start >= ${filters.since.toISOString()}::timestamptz`,
+    sql`bucket_start < ${filters.until.toISOString()}::timestamptz`,
+  ];
+
+  if (filters.service !== undefined) {
+    clauses.push(sql`service = ${filters.service}`);
+  }
+
+  if (filters.level !== undefined) {
+    clauses.push(sql`level = ${filters.level}::log_level`);
+  }
+
+  return clauses.reduce((left, right) => sql`${left} AND ${right}`);
+}
+
 function buildWhere(filters: {
   service?: string;
   level?: string;
@@ -264,8 +373,4 @@ function buildWhere(filters: {
 
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

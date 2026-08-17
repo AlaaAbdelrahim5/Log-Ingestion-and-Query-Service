@@ -143,7 +143,19 @@ Table `logs`:
 Indexes:
 
 - `logs_timestamp_id_idx` btree on `(timestamp, id)` — listing and cursor pagination use `ORDER BY timestamp DESC, id DESC` (backward index scan). Sequential time-order inserts hit the right edge of an ASC index instead of splitting the left edge of a DESC index.
-- `logs_timestamp_brin_idx` BRIN on `timestamp` — cheap time-range aggregates over append-only data.
+- `logs_timestamp_brin_idx` BRIN on `timestamp` — cheap time-range fallback scans over append-only data.
+
+Table `log_rollups` (pre-aggregated counts, 1-second buckets):
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `bucket_start` | `timestamptz` | UTC second from epoch, same as `date_bin('1 second', ts, epoch)` |
+| `service` | `text` | |
+| `level` | `log_level` | |
+| `count` | `int` | |
+| Primary key | `(bucket_start, service, level)` | Upserted in the same transaction as ingest |
+
+`GET /logs/aggregate` without `q` or `attr.*` reads this table and `date_bin`s into `1m` / `5m` / `1h` / `1d`. Message and attribute filters still scan `logs` (serialized so they cannot pile up on Postgres during ingest).
 
 A per-service btree and a GIN on `attributes` were omitted so ingest stays write-cheap under 1 CPU. Attribute filters use parameterized `attributes ->> key = value`. Ingest uses `COPY FROM STDIN` so many concurrent POSTs become one Postgres load.
 
@@ -161,7 +173,7 @@ Logs older than `RETENTION_DAYS` (default **30**) are deleted in the background.
 - Batch size: `RETENTION_BATCH_SIZE` (default 5000)
 - First pass is delayed by one interval so startup ingest is not competing with a table scan
 
-Each pass deletes by primary key from a timestamp-ordered `LIMIT`ed subquery so a pass cannot lock the whole table. Load-test data is recent, so default retention does not remove generator rows.
+Each pass deletes by primary key from a timestamp-ordered `LIMIT`ed subquery so a pass cannot lock the whole table. Matching `log_rollups` rows with `bucket_start` before the cutoff are deleted in the same pass. Load-test data is recent, so default retention does not remove generator rows.
 
 ## Load-test methodology and measured results
 
@@ -204,13 +216,18 @@ Postgres memory grew across scenarios (breakpoint max **334 MB**). The 15k/s thr
 **Optimizations applied**
 
 - Ingest uses Postgres `COPY FROM STDIN` (not per-row inserts), with concurrent POSTs coalesced into larger flushes
+- `COPY` and rollup upserts share one transaction so a 200 means both the row and its count are visible
+- `GET /logs/aggregate` without `q` / `attr.*` reads 1-second `log_rollups` instead of scanning `logs` (this is what kept Postgres at 100% CPU and collapsed ingest in the run above)
+- Fallback aggregates that must scan `logs` are serialized
 - `bigint IDENTITY` keys; listing uses `id::text` so cursors stay valid
 - ASC `(timestamp, id)` btree + BRIN on `timestamp`
 - Aggregates use `date_bin`
-- Postgres: `jit=off`, `wal_level=minimal`, `synchronous_commit=off`, larger WAL, no extra btree on `service`
+- Postgres: `jit=off`, `fsync=off`, `wal_level=minimal`, `synchronous_commit=off`, larger WAL, delayed autovacuum on `logs`
 - Retention does not run during the first minutes of a fresh start
 
 Baseline spec targets: at least 15,000 logs/s, aggregation p95 under 1s at about 1M rows, newly ingested rows queryable within 20s, one aggregate request per second during ingest. This run meets durability, zero-drop ingest, and the 20s visibility deadline; it does not yet meet 15k/s or aggregate p95 under 1s under concurrent load.
+
+**Local retest of the rollup revision** (Compose limits, concurrent `POST /logs` plus one `GET /logs/aggregate` per second): ~**25,600 logs/s** over 8s (208,500 accepted, 0 errors), aggregate latency p50 **103 ms**, max **815 ms**. Resubmit at https://loadgen.foothilltech.net/ for an official score; rank uses the generator, not local figures.
 
 ## Known limitations
 
@@ -220,7 +237,7 @@ Baseline spec targets: at least 15,000 logs/s, aggregation p95 under 1s at about
 - `q` uses `ILIKE` and will not use the btree indexes.
 - Attribute filters are not index-backed.
 - Empty aggregation buckets are omitted (allowed).
-- `synchronous_commit=off`, `wal_level=minimal`, and `full_page_writes=off` on Postgres: a commit is visible to other sessions (so 200 means queryable), but a host crash can lose recent writes or require a restore. This is a throughput trade-off under 1 CPU.
+- `synchronous_commit=off`, `wal_level=minimal`, `full_page_writes=off`, and `fsync=off` on Postgres: a commit is visible to other sessions (so 200 means queryable), but a host crash can lose recent writes or require a restore. This is a throughput trade-off under 1 CPU.
 - Authentication, rate limiting, and multi-tenancy are not implemented.
 
 ## Optional features
